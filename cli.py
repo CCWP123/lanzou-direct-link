@@ -46,7 +46,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from lanzou_direct import (                       # noqa: E402
     LanzouFile, LanzouError, NotLanzouUrl, ParseFailed, PasswordRequired,
-    is_lanzou_url, parse, resolve_real_url, _dl_headers,
+    DownloadCancelled, is_lanzou_url, parse, resolve_real_url, download,
 )
 
 
@@ -89,55 +89,35 @@ def print_result(f: LanzouFile, as_json: bool, quiet: bool, resolved):
 #  下载 / Download
 # ---------------------------------------------------------------------------
 
-def _filename_from(resp, url, fallback='download.bin'):
-    cd = resp.headers.get('Content-Disposition', '') or ''
-    for key in ('filename*=', 'filename='):
-        if key in cd:
-            part = cd.split(key, 1)[1].split(';')[0].strip().strip('"\'')
-            if part.lower().startswith('utf-8\'\''):
-                part = part[7:]
-            if part:
-                try:
-                    from urllib.parse import unquote
-                    return unquote(part)
-                except Exception:                  # noqa: BLE001
-                    return part
-    name = os.path.basename(url.split('?')[0])
-    return name or fallback
-
-
 def do_download(url: str, dest: str, timeout: int) -> bool:
-    import requests
+    """复用核心库的 download()，这里只负责画进度条。"""
+    last = {'t': 0.0}
+
+    def on_progress(done, total):
+        import time as _t
+        now = _t.time()
+        if now - last['t'] < 0.1 and done != total:
+            return                                   # 限流，别把终端刷爆
+        last['t'] = now
+        if total:
+            pct = done * 100.0 / total
+            bar = '#' * int(pct / 2.5)
+            sys.stderr.write('\r  [%-40s] %5.1f%%  %.1f/%.1f MB'
+                             % (bar, pct, done / 1048576.0, total / 1048576.0))
+        else:
+            sys.stderr.write('\r  已下载 %.1f MB' % (done / 1048576.0))
+        sys.stderr.flush()
+
     try:
-        with requests.get(url, headers=_dl_headers(url), stream=True,
-                          timeout=timeout, allow_redirects=True) as r:
-            r.raise_for_status()
-            total = int(r.headers.get('Content-Length') or 0)
-
-            if os.path.isdir(dest):
-                path = os.path.join(dest, _filename_from(r, r.url or url))
-            else:
-                path = dest
-
-            done = 0
-            with open(path, 'wb') as fh:
-                for chunk in r.iter_content(chunk_size=64 * 1024):
-                    if not chunk:
-                        continue
-                    fh.write(chunk)
-                    done += len(chunk)
-                    if total:
-                        pct = done * 100.0 / total
-                        bar = '#' * int(pct / 2.5)
-                        sys.stderr.write('\r  [%-40s] %5.1f%%  %.1f/%.1f MB'
-                                         % (bar, pct, done / 1048576.0,
-                                            total / 1048576.0))
-                    else:
-                        sys.stderr.write('\r  已下载 %.1f MB' % (done / 1048576.0))
-                    sys.stderr.flush()
+        path = download(url, dest, timeout=timeout, progress=on_progress)
         sys.stderr.write('\n')
-        print('✔ 已保存 / saved: %s  (%.2f MB)' % (path, done / 1048576.0))
+        size = os.path.getsize(path) / 1048576.0 if os.path.exists(path) else 0
+        print('✔ 已保存 / saved: %s  (%.2f MB)' % (path, size))
         return True
+    except DownloadCancelled:
+        sys.stderr.write('\n')
+        print('✘ 下载已取消 / cancelled')
+        return False
     except Exception as e:                          # noqa: BLE001
         sys.stderr.write('\n')
         print('✘ 下载失败 / download failed: %s' % e)

@@ -1,11 +1,16 @@
 # lanzou-direct-link
 
-> 把蓝奏云（Lanzou）的分享链接解析成**可以直接丢进浏览器的下载直链**，纯 `requests` 实现。
-> Turn a Lanzou Cloud share link into a **direct download URL you can paste into a browser** — pure `requests`, no third-party parsing API.
+> 把蓝奏云（Lanzou）的分享链接解析成**可以直接丢进浏览器的下载直链** —— 带图形界面，粘贴链接即自动解析并下载。
+> Turn a Lanzou Cloud share link into a **direct download URL** — with a GUI: paste a link, it auto-parses and downloads.
 
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue.svg)](#-安装--installation)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
-[![Dependencies](https://img.shields.io/badge/dependencies-requests%20only-brightgreen.svg)](#-安装--installation)
+[![Core deps](https://img.shields.io/badge/core%20deps-requests%20only-brightgreen.svg)](#-安装--installation)
+[![GUI](https://img.shields.io/badge/GUI-PyQt6-green.svg)](https://pypi.org/project/PyQt6/)
+
+<p align="center">
+  <img src="screenshot.png" alt="lanzou-direct-link GUI" width="820">
+</p>
 
 ---
 
@@ -17,6 +22,7 @@
 - [快速开始 / Quick Start](#-快速开始--quick-start)
 - [原理详解 / How It Works](#-原理详解--how-it-works)
 - [API 参考 / API Reference](#-api-参考--api-reference)
+- [打包成 exe / Build a Standalone EXE](#-打包成-exe--build-a-standalone-exe)
 - [常见问题 / FAQ](#-常见问题--faq)
 - [注意事项与免责声明 / Disclaimer](#-注意事项与免责声明--disclaimer)
 - [License](#-license)
@@ -56,8 +62,14 @@ This library implements that exchange in pure Python:
 
 ## ✨ 特性 / Features
 
-- **纯 `requests`，只依赖一个库**
-  Pure `requests` — exactly one dependency.
+- **🖥️ 图形界面：粘贴即解析**
+  `lanzou_gui.py` —— 粘链接进输入框就自动开始解析，回车也行；启动时还会自动读剪贴板。
+  界面里直链一键复制 / 一键用浏览器打开，内置下载器带实时进度与速度。
+  **GUI: paste and it just works** — auto-parses on paste (and reads your clipboard
+  at startup), one-click copy / open, plus a built-in downloader with live progress.
+- **纯 `requests` 内核，只依赖一个库**
+  核心库 `lanzou_direct.py` 只依赖 `requests`；PyQt6 只为界面而装。
+  Pure `requests` core — `lanzou_direct.py` needs nothing but `requests`.
 - **不依赖任何第三方解析服务**
   不调用别人的 API，不受第三方限流/下线影响，也不会把你的链接送到别人服务器上。
   No third-party parsing API: no rate limits, no downtime, and your links never
@@ -72,15 +84,22 @@ This library implements that exchange in pure Python:
 - **支持提取码**
   传入 `pwd` 会随请求一起提交，并能区分「真的解析失败」和「需要提取码」。
   Password-protected shares are supported, and "needs a code" is a distinct error.
+- **下载自动带 Referer**
+  蓝奏云 CDN 会校验 `Referer`，直接拿直链下载可能 403；本库的下载器会自动带上正确请求头。
+  The downloader always sends the Referer Lanzou's CDN expects.
+- **可取消的下载**
+  取消后会自动删掉半截文件，不留垃圾。
+  Cancelling cleans up the partial file.
 - **可选的浏览器兜底**
   当页面必须执行 JS 才生成 `sign` 时，可以挂 Playwright 无头浏览器（复用系统 Edge/Chrome，不必额外下载内核）。
   Optional Playwright fallback that reuses your system Edge/Chrome.
 - **可选的最终地址解析**
   `resolve=True` 再跟一层重定向，拿到带真实文件名的 CDN 地址。
   `resolve=True` follows redirects to the final CDN URL with the real filename.
-- **完整 CLI + 离线测试**
-  38 个单元测试包含用 mock session 跑通的端到端流程，测试**不发任何网络请求**。
-  38 unit tests, including a fully mocked end-to-end flow — **no network needed**.
+- **两层测试**
+  38 个离线单元测试（含 mock 端到端）+ 46 项无头 GUI 功能测试（自建本地假 CDN 验证下载/取消）。
+  38 offline unit tests + 46 headless GUI checks (download/cancel verified against a
+  local fake CDN).
 
 ---
 
@@ -92,14 +111,17 @@ This library implements that exchange in pure Python:
 git clone https://github.com/CCWP123/lanzou-direct-link.git
 cd lanzou-direct-link
 
-pip install -r requirements.txt      # 就一个 requests
+pip install -r requirements.txt      # requests + PyQt6
 
-# 可选：装浏览器兜底
-# pip install playwright
-# playwright install chromium        # 系统有 Edge/Chrome 可跳过
+# 只想用命令行的话，其实只需要 requests：
+# pip install requests
+
+# 可选：浏览器兜底
+# pip install playwright && playwright install chromium   # 系统有 Edge/Chrome 可跳过
 
 # 跑测试
-python tests/test_extract.py         # 38 个测试，全离线
+python tests/test_extract.py         # 38 个离线单元测试
+python tests/gui_functional.py    # 46 项无头 GUI 功能测试（需 PyQt6，不需要显示器）
 ```
 
 **English**
@@ -108,18 +130,37 @@ python tests/test_extract.py         # 38 个测试，全离线
 git clone https://github.com/CCWP123/lanzou-direct-link.git
 cd lanzou-direct-link
 
-pip install -r requirements.txt      # just requests
+pip install -r requirements.txt      # requests + PyQt6
+
+# CLI only? You just need requests:
+# pip install requests
 
 # optional browser fallback
-# pip install playwright
-# playwright install chromium        # skip if you already have Edge/Chrome
+# pip install playwright && playwright install chromium   # skip if you have Edge/Chrome
 
-python tests/test_extract.py         # 38 offline tests
+python tests/test_extract.py         # 38 offline unit tests
+python tests/gui_functional.py    # 46 headless GUI checks (needs PyQt6, no display)
 ```
 
 ---
 
 ## ⚡ 快速开始 / Quick Start
+
+### 🖥️ 图形界面 / GUI（推荐给普通用户）
+
+```bash
+python lanzou_gui.py
+```
+
+用法就三步：
+
+1. **把蓝奏云分享链接粘进输入框** —— 粘上就自动开始解析（也可以按回车或点「解析」）；
+   程序启动时如果发现剪贴板里已经有蓝奏云链接，也会自动填进去并解析。
+2. 有提取码就填在右边的「提取码」框里。
+3. 解析出文件名/大小/直链后，点 **「开始下载」** 即可；也可以点 **「复制直链」** 拿去喂给
+   IDM / aria2，或点 **「浏览器打开」** 直接跳转。
+
+下载过程中有实时进度和速度，随时可以点「取消下载」（会顺手删掉半截文件）。
 
 ### 命令行 / CLI
 
@@ -271,10 +312,21 @@ tests/test_extract.py::TestExtractSignsVesFid::test_ves_unquoted
 |---|---|
 | `parse(share_url, pwd='', *, resolve=False, timeout=15, session=None, allow_browser_fallback=False)` | **主入口**，返回 `LanzouFile` |
 | `resolve_real_url(middle_url, *, timeout, session)` | 跟随重定向拿最终 CDN 地址 |
+| `download(url, dest, *, timeout, chunk_size, progress=None, cancel=None, session=None)` | **带正确 Referer 的下载**；`dest` 传目录则自动推断文件名；返回实际写入路径 |
+| `guess_filename(resp=None, url='', fallback=...)` | 从 `Content-Disposition`（含 RFC 5987 的 `filename*=UTF-8''`）或 URL 推断文件名 |
 | `is_lanzou_url(url)` | 判断是否蓝奏云分享链接（只认 http/https） |
 | `LanzouFile` | 结果数据类：`direct_url` / `middle_url` / `name` / `size` / `share_url` / `real_url` / `raw`，含 `ok` / `to_dict()` / `to_json()` |
 | `extract_sign` / `extract_signs` / `extract_ves` / `extract_ajax_path` / `extract_fid` / `extract_iframe` | 独立的 HTML 提取函数（便于自己组合或测试） |
-| `NotLanzouUrl` / `PasswordRequired` / `ParseFailed` | 异常类型，三者的语义各不相同 |
+| `NotLanzouUrl` / `PasswordRequired` / `ParseFailed` / `DownloadCancelled` | 异常类型，语义各不相同 |
+
+### `lanzou_gui.py`（图形界面）
+
+| 名称 | 说明 |
+|---|---|
+| `LanzouGui` | 主窗口（`QMainWindow`）。解析与下载都在后台线程，UI 不卡；跨线程用 `pyqtSignal` 回主线程 |
+| `main()` | 启动界面 |
+| `human(n)` | 字节数转人类可读（`1.50 KB` / `11.92 MB`） |
+| `default_download_dir()` | 推断默认保存目录（下载 → 桌面 → 用户主目录） |
 
 ### `browser_fallback.py`（可选）
 
@@ -289,7 +341,63 @@ tests/test_extract.py::TestExtractSignsVesFid::test_ves_unquoted
 
 ---
 
+## 📦 打包成 exe / Build a Standalone EXE
+
+给不想装 Python 的人用：
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --windowed --name 蓝奏云直链下载器 lanzou_gui.py
+# 产物: dist\蓝奏云直链下载器.exe
+```
+
+想连浏览器兜底一起打进去的话，额外加 `--collect-all playwright`（体积会大不少）。
+
+> Want the browser fallback bundled too? Add `--collect-all playwright`
+> (the exe gets noticeably bigger).
+
+## 🗂️ 项目结构 / Project layout
+
+```
+lanzou-direct-link/
+├── lanzou_direct.py        核心库：7 步换直链 + 带进度/可取消的下载（纯 requests）
+├── lanzou_gui.py           🖥️ PyQt6 图形界面（粘贴即解析）
+├── browser_fallback.py     可选：Playwright 无头浏览器兜底
+├── cli.py                  命令行入口
+├── examples/quickstart.py  最小示例
+├── tests/
+│   ├── test_extract.py         38 个离线单元测试（含 mock 端到端，不需要 PyQt6）
+│   └── gui_functional.py       46 项无头 GUI 功能测试（需 PyQt6，不需要显示器）
+├── screenshot.png          界面截图
+├── requirements.txt
+├── README.md
+├── LICENSE
+└── .gitignore
+```
+
+---
+
 ## ❓ 常见问题 / FAQ
+
+<details>
+<summary><b>GUI 启动报 <code>No module named 'PyQt6'</code>？</b> / GUI says PyQt6 missing?</summary>
+
+界面是可选组件，核心库和命令行都不需要它。想用界面就装一下：
+
+```bash
+pip install PyQt6
+```
+
+（`pip install -r requirements.txt` 已经包含它了。）
+</details>
+
+<details>
+<summary><b>GUI 里点了「浏览器打开」却 403？</b> / GUI's "open in browser" 403s?</summary>
+
+浏览器直接打开中间页时没有正确的 `Referer`，蓝奏云 CDN 会拒绝。
+**直接用界面里的「开始下载」** —— 那条路径会自动带上正确的请求头。
+（命令行同理：`--open` 可能 403，`--download` 不会。）
+</details>
 
 <details>
 <summary><b>提示「未能从页面提取 sign」？</b> / "could not extract sign"?</summary>

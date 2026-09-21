@@ -48,6 +48,7 @@ Lanzou data. Respect Lanzou's ToS; use it on your own files or authorised shares
 """
 
 import json
+import os
 import random
 import re
 from dataclasses import dataclass, field, asdict
@@ -62,9 +63,12 @@ __all__ = [
     'NotLanzouUrl',
     'ParseFailed',
     'PasswordRequired',
+    'DownloadCancelled',
     'is_lanzou_url',
     'parse',
     'resolve_real_url',
+    'download',
+    'guess_filename',
     'extract_sign',
     'extract_signs',
     'extract_ves',
@@ -154,6 +158,10 @@ class PasswordRequired(LanzouError):
 
 class ParseFailed(LanzouError):
     """所有方法都没能换出直链 / every strategy failed."""
+
+
+class DownloadCancelled(LanzouError):
+    """下载被调用方主动中止 / the download was cancelled by the caller."""
 
 
 # ---------------------------------------------------------------------------
@@ -600,6 +608,114 @@ def resolve_real_url(middle_url: str,
                    ('.zip', '.rar', '.7z', '.exe', '.apk', 'download')):
                 return m
     return None
+
+
+# ---------------------------------------------------------------------------
+#  下载 / Download
+# ---------------------------------------------------------------------------
+
+def guess_filename(resp=None, url: str = '', fallback: str = 'download.bin') -> str:
+    """
+    推断保存文件名：优先 Content-Disposition，其次 URL 末段。
+    Work out a filename: prefer Content-Disposition, fall back to the URL tail.
+    """
+    from urllib.parse import unquote
+
+    cd = ''
+    try:
+        cd = (resp.headers.get('Content-Disposition') or '') if resp is not None else ''
+    except Exception:                                # noqa: BLE001
+        cd = ''
+    for key in ('filename*=', 'filename='):
+        if key in cd:
+            part = cd.split(key, 1)[1].split(';')[0].strip().strip('"\'')
+            if part.lower().startswith("utf-8''"):
+                part = part[7:]
+            if part:
+                return unquote(part)
+
+    name = unquote(os.path.basename((url or '').split('?')[0]))
+    if name and '.' in name:
+        return name
+    return name or fallback
+
+
+def download(url: str,
+             dest: str,
+             *,
+             timeout: int = DEFAULT_TIMEOUT,
+             chunk_size: int = 64 * 1024,
+             progress=None,
+             cancel=None,
+             session: Optional[requests.Session] = None) -> str:
+    """
+    下载直链到本地，自动带上蓝奏云 CDN 需要的 Referer。
+    Download a direct URL, automatically sending the Referer Lanzou's CDN wants.
+
+    直接用浏览器打开 ``dom/file/xxx`` 有时会 403，就是因为缺 Referer；
+    走这个函数则一定带上正确的请求头。
+    Opening ``dom/file/xxx`` in a browser can 403 because the CDN checks the
+    Referer. This function always sends the right headers.
+
+    :param url:      ``parse()`` 返回的 ``direct_url`` 或 ``real_url``
+    :param dest:     目标文件路径；若传的是**已存在的目录**，自动推断文件名
+    :param progress: 进度回调 ``progress(done_bytes, total_bytes)``，
+                     ``total_bytes`` 未知时为 0 / progress callback
+    :param cancel:   取消回调 ``cancel() -> bool``，返回 True 即中止
+    :return:         实际写入的文件路径 / the path actually written
+    :raises DownloadCancelled: 被 cancel 中止
+    :raises LanzouError:       网络或写入失败
+    """
+    sess = session or requests.Session()
+    try:
+        r = sess.get(url, headers=_dl_headers(url), stream=True,
+                     timeout=timeout, allow_redirects=True)
+    except Exception as e:                           # noqa: BLE001
+        raise LanzouError('请求下载地址失败 / request failed: %s' % e) from None
+
+    with r:
+        if r.status_code >= 400:
+            raise LanzouError('下载地址返回 HTTP %s（可能需要 Referer 或链接已过期）'
+                              % r.status_code)
+
+        try:
+            total = int(r.headers.get('Content-Length') or 0)
+        except Exception:                            # noqa: BLE001
+            total = 0
+
+        path = dest
+        if os.path.isdir(dest):
+            path = os.path.join(dest, guess_filename(r, r.url or url))
+        parent = os.path.dirname(os.path.abspath(path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
+        done = 0
+        try:
+            with open(path, 'wb') as fh:
+                for chunk in r.iter_content(chunk_size=chunk_size):
+                    if cancel and cancel():
+                        raise DownloadCancelled('下载已取消 / cancelled')
+                    if not chunk:
+                        continue
+                    fh.write(chunk)
+                    done += len(chunk)
+                    if progress:
+                        try:
+                            progress(done, total)
+                        except Exception:            # noqa: BLE001
+                            pass
+        except DownloadCancelled:
+            try:                                     # 取消时清理半截文件
+                if os.path.exists(path):
+                    os.remove(path)
+            except Exception:                        # noqa: BLE001
+                pass
+            raise
+        except Exception as e:                       # noqa: BLE001
+            raise LanzouError('写入文件失败 / write failed: %s' % e) from None
+
+    return path
 
 
 # ---------------------------------------------------------------------------
