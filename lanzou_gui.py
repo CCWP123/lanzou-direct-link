@@ -169,6 +169,19 @@ def default_download_dir() -> str:
     return home
 
 
+def shorten(url: str, keep: int = 58) -> str:
+    """
+    日志里用的短链接：蓝奏云的直链有 300~700 个字符（鉴权串全在里面），
+    整条打进日志窗口会把其他信息冲掉 —— 完整直链在「直链」那一栏里，
+    可以复制也可以点「浏览器打开」。
+    Shorten a URL for the log pane; the full link lives in its own row.
+    """
+    url = (url or '').strip()
+    if len(url) <= keep:
+        return url
+    return url[:keep] + '…（共 %d 字符，完整直链见上方「直链」栏）' % len(url)
+
+
 # ===========================================================================
 #  主窗口 / Main window
 # ===========================================================================
@@ -518,7 +531,7 @@ class LanzouGui(QMainWindow):
             self.log('  文件名: %s' % f.name)
         if f.size:
             self.log('  大小  : %s' % f.size)
-        self.log('  直链  : %s' % f.direct_url)
+        self.log('  直链  : %s' % shorten(f.direct_url))
 
     def _on_parse_error(self, kind, msg):
         self.btn_download.setEnabled(False)

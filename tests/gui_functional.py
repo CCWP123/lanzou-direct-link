@@ -157,6 +157,18 @@ def main():
     check('下载按钮已启用', win.btn_download.isEnabled())
     check('状态标签为解析成功', '解析成功' in win.chip.text(), win.chip.text())
 
+    # 超长直链不能把日志窗口刷屏（蓝奏云直链有 300~700 字符）
+    long_url = 'https://developer4.lanrar.com/file/?' + 'A' * 600
+    long_file = LanzouFile(direct_url=long_url, name='很长的直链.bin', size='28.73 MB')
+    win.log_view.clear()
+    win._on_parsed(long_file)
+    app.processEvents()
+    log_text = win.log_view.toPlainText()
+    check('直链栏保留完整直链', win.lb_url.text() == long_url)
+    check('日志里的直链被截断', long_url not in log_text)
+    check('日志提示去直链栏看完整地址', '完整直链见上方' in log_text)
+    check('短链接原样显示', G.shorten('https://a.b/c') == 'https://a.b/c')
+
     # ---- 5. 下载：进度回调 + 完成 ----
     print('\n[5] 下载流程（本地假 CDN）')
     httpd, port = start_fake_cdn()
