@@ -89,7 +89,7 @@ def print_result(f: LanzouFile, as_json: bool, quiet: bool, resolved):
 #  下载 / Download
 # ---------------------------------------------------------------------------
 
-def do_download(url: str, dest: str, timeout: int) -> bool:
+def do_download(url: str, dest: str, timeout: int, cookies=None) -> bool:
     """复用核心库的 download()，这里只负责画进度条。"""
     last = {'t': 0.0}
 
@@ -109,7 +109,9 @@ def do_download(url: str, dest: str, timeout: int) -> bool:
         sys.stderr.flush()
 
     try:
-        path = download(url, dest, timeout=timeout, progress=on_progress)
+        path = download(url, dest, timeout=timeout, cookies=cookies,
+                        progress=on_progress,
+                        log=lambda m: sys.stderr.write('  %s\n' % m))
         sys.stderr.write('\n')
         size = os.path.getsize(path) / 1048576.0 if os.path.exists(path) else 0
         print('✔ 已保存 / saved: %s  (%.2f MB)' % (path, size))
@@ -141,7 +143,9 @@ def build_parser():
     ap.add_argument('--resolve', action='store_true',
                     help='再跟随重定向，拿最终 CDN 地址')
     ap.add_argument('--browser', action='store_true',
-                    help='静态解析失败时用 Playwright 无头浏览器兜底')
+                    help='直接用浏览器引擎解析（最稳；默认已会在 HTTP 失败后自动使用）')
+    ap.add_argument('--http', action='store_true',
+                    help='只用纯 HTTP 解析（快，但现代蓝奏云多数会失败）')
     ap.add_argument('--json', action='store_true', help='以 JSON 输出')
     ap.add_argument('--quiet', '-q', action='store_true',
                     help='只输出直链本身（方便脚本使用）')
@@ -163,12 +167,14 @@ def main(argv=None):
         return 1
 
     # ---- 解析 ----
+    engine = 'browser' if args.browser else ('http' if args.http else 'auto')
     try:
         f = parse(args.share_url,
                   pwd=args.pwd,
                   resolve=args.resolve,
                   timeout=args.timeout,
-                  allow_browser_fallback=args.browser)
+                  engine=engine,
+                  log=(None if args.quiet else (lambda m: print('  ' + m))))
     except PasswordRequired as e:
         print('✘ %s' % e, file=sys.stderr)
         print('  请加 --pwd <提取码> 重试。', file=sys.stderr)
@@ -178,8 +184,6 @@ def main(argv=None):
         return 1
     except ParseFailed as e:
         print('✘ 解析失败 / parse failed: %s' % e, file=sys.stderr)
-        if not args.browser:
-            print('  可以试试加 --browser 用无头浏览器兜底。', file=sys.stderr)
         return 2
     except LanzouError as e:
         print('✘ %s' % e, file=sys.stderr)
@@ -196,7 +200,8 @@ def main(argv=None):
     # ---- 后续动作 ----
     rc = 0
     if args.download and not args.quiet:
-        ok = do_download(target, args.download, args.timeout)
+        # 解析时顺手拿到的 CDN 反爬 cookie 直接复用，省得再过一次挑战
+        ok = do_download(target, args.download, args.timeout, cookies=f.cookies)
         rc = 0 if ok else 2
     if args.open:
         if args.quiet:

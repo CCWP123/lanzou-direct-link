@@ -135,7 +135,7 @@ def main():
         check('解析失败并上报了错误', 'err' in seen, seen.get('err'))
         check('状态标签变成"解析失败"', '解析失败' in win.chip.text(), win.chip.text())
         check('日志里记录了失败原因', '✘' in log_text, log_text.strip().splitlines()[-1:] )
-        check('日志里给出了兜底提示', '--browser' in log_text)
+        check('日志里给出了兜底提示', 'playwright' in log_text)
         check('下载按钮仍为禁用', not win.btn_download.isEnabled())
     print('  ---- 实际日志 ----')
     for line in log_text.splitlines():

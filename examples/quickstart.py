@@ -9,6 +9,7 @@ Minimal example: get a browser-ready direct link in three lines.
 运行 / Run:
     python examples/quickstart.py "https://www.lanzou.com/xxxxx"
     python examples/quickstart.py "https://www.lanzou.com/xxxxx" 1234
+    python examples/quickstart.py "https://www.lanzou.com/xxxxx" "" .    # 顺带真下载
 """
 
 import json
@@ -17,7 +18,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from lanzou_direct import parse, resolve_real_url, LanzouFile   # noqa: E402
+from lanzou_direct import (                        # noqa: E402
+    parse, resolve_real_url, download, probe_direct_url, LanzouFile,
+)
 
 
 def demo_simple(url: str, pwd: str = ''):
@@ -27,6 +30,7 @@ def demo_simple(url: str, pwd: str = ''):
     print('文件名 :', f.name)
     print('大小   :', f.size)
     print('直链   :', f.direct_url)
+    print('引擎   :', f.engine)
     return f
 
 
@@ -49,6 +53,41 @@ def demo_json(url: str, pwd: str = ''):
     return f
 
 
+def demo_download(f: LanzouFile, dest: str = '.'):
+    """
+    下载 —— 注意 `cookies`。
+
+    蓝奏云的下载节点有 JS 反爬挑战，`parse()` 已经顺手过掉并把 cookie 存在
+    `f.cookies` 里；把它传给 `download()` 就不用再过一次。
+    其实不传也行：`download()` 自己嗅到挑战页会补过一遍，只是多花几秒。
+    """
+    print()
+    print('=== 下载 / download ===')
+    print('已备好的反爬 cookie:', ', '.join(sorted(f.cookies)) or '(无)')
+
+    info = probe_direct_url(f.direct_url, cookies=f.cookies)
+    if info['ok']:
+        print('探测结果: %s · %s' % (info['filename'], info['total']))
+    else:
+        print('探测未通过:', info['message'])
+
+    def on_progress(done, total):
+        if total:
+            sys.stderr.write('\r  %5.1f%%  %.1f/%.1f MB'
+                             % (done * 100.0 / total,
+                                done / 1048576.0, total / 1048576.0))
+            sys.stderr.flush()
+
+    try:
+        path = download(f.direct_url, dest, cookies=f.cookies,
+                        progress=on_progress)
+        sys.stderr.write('\n')
+        print('已保存:', path)
+    except Exception as e:                          # noqa: BLE001
+        sys.stderr.write('\n')
+        print('下载失败:', e)
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -63,6 +102,13 @@ def main():
         f = demo_simple(url, pwd)
         demo_resolve(url, pwd)
         demo_json(url, pwd)
+        if len(sys.argv) > 3:
+            # 第四个参数给了目录才真的下载，免得默认示例就拉几十 MB
+            demo_download(f, sys.argv[3])
+        else:
+            print()
+            print('（加一个目录参数就会真的下载，例如：')
+            print('  python examples/quickstart.py "%s" "" . ）' % url)
     except Exception as e:                          # noqa: BLE001
         print('解析失败 / failed: %s' % e)
         return 1

@@ -479,7 +479,12 @@ class LanzouGui(QMainWindow):
 
         def worker():
             try:
-                f = parse(url, pwd=pwd, timeout=20)
+                # engine='auto'：先试纯 HTTP 快路，失败自动切浏览器引擎。
+                # 现代蓝奏云基本都会走浏览器那条；浏览器版本会**一次启动**同时
+                # 完成「渲染分享页 → 拿直链 → 过 CDN 反爬」，所以稍慢几秒。
+                # 日志实时回传，让用户看到「正在渲染页面 / 正在尝试第 N 种方法」。
+                f = parse(url, pwd=pwd, timeout=30,
+                          log=lambda m: self.sig_log.emit(str(m)))
                 self.sig_parsed.emit(f)
             except PasswordRequired:
                 self.sig_parse_error.emit('pwd', '该分享需要提取码，请填写后重试')
@@ -530,8 +535,9 @@ class LanzouGui(QMainWindow):
             self._chip('● 解析失败', C_ERROR)
         self.log('✘ %s' % msg)
         if kind in ('parse', 'net'):
-            self.log('  提示: 蓝奏云改版后部分页面必须执行 JS 才生成 sign，')
-            self.log('        可改用命令行 `python cli.py "<链接>" --browser`（需 playwright）。')
+            self.log('  提示: 蓝奏云多数分享页需要浏览器渲染，本引擎会自动处理；')
+            self.log('        若一直失败，先确认浏览器引擎装好了 ——')
+            self.log('        命令: pip install playwright 然后 playwright install chromium')
 
     # ---------------------------------------------------------------- 直链
     def copy_url(self):
@@ -546,8 +552,8 @@ class LanzouGui(QMainWindow):
             return
         QDesktopServices.openUrl(QUrl(self.file.direct_url))
         self.log('已用默认浏览器打开直链')
-        self.log('  注意: 浏览器直接打开有时会 403（CDN 校验 Referer），')
-        self.log('        这种情况请用本工具的「开始下载」。')
+        self.log('  注意: 下载节点有 JS 反爬，浏览器会先闪一个校验页再开始下载；')
+        self.log('        若浏览器只是显示一段脚本或 403，请改用本工具的「开始下载」。')
 
     def open_folder(self):
         if os.path.isdir(self._save_dir):
@@ -585,8 +591,12 @@ class LanzouGui(QMainWindow):
 
         url = self.file.direct_url
         dest = self._save_dir
+        # 解析时顺手过掉的 CDN 反爬 cookie，带上就不用再过一次
+        cookies = dict(getattr(self.file, 'cookies', None) or {})
         self.log('')
         self.log('→ 开始下载到: %s' % dest)
+        if cookies:
+            self.log('  已带上 CDN 反爬 cookie（%s）' % ', '.join(sorted(cookies)))
 
         t0 = time.time()
         last = {'t': 0.0}
@@ -600,8 +610,10 @@ class LanzouGui(QMainWindow):
         def worker():
             try:
                 path = download(url, dest, timeout=30,
+                                cookies=cookies,
                                 progress=on_progress,
-                                cancel=lambda: self._cancel_download)
+                                cancel=lambda: self._cancel_download,
+                                log=lambda m: self.sig_log.emit(str(m)))
                 elapsed = max(0.001, time.time() - t0)
                 size = os.path.getsize(path) if os.path.exists(path) else 0
                 speed = size / elapsed
