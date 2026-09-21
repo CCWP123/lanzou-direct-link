@@ -1,0 +1,10 @@
+# lanzou-direct-link —— 依赖 / dependencies
+#
+# 必需 / required
+requests>=2.25
+#
+# 可选 / optional —— 仅当需要无头浏览器兜底（cli.py --browser）时安装
+# 装完还要执行一次: playwright install chromium
+# （若系统里已有 Edge/Chrome，可跳过那一步，代码会自动用 channel=msedge/chrome）
+#
+# playwright>=1.30

@@ -1,0 +1,63 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# ---- 虚拟环境 / Virtual environments ----
+.venv/
+venv/
+ENV/
+env/
+.python-version
+
+# ---- 测试与覆盖率 / Testing & coverage ----
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+coverage.xml
+
+# ---- Playwright 浏览器缓存 / Playwright browser cache ----
+playwright-report/
+test-results/
+
+# ---- IDE / 编辑器 ----
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+.settings/
+
+# ---- 操作系统 / OS ----
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# ---- 运行时产物 / runtime artifacts ----
+# CLI --download 下来的文件与临时文件
+*.part
+*.tmp
+*.crdownload
